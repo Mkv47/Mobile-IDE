@@ -14,6 +14,8 @@
   #topbar button { padding:4px 14px; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem; }
   #btnSave   { background:#0e6416; color:#fff; }
   #btnSave:hover { background:#1a7a20; }
+  #btnDl     { background:#333; color:#aaa; display:none; }
+  #btnDl:hover { background:#444; color:#fff; }
   #btnTerm   { background:#333; color:#aaa; font-family:monospace; letter-spacing:0.5px; }
   #btnTerm:hover, #btnTerm.active { background:#007acc; color:#fff; }
   #btnLogout { background:#333; color:#aaa; }
@@ -43,8 +45,14 @@
 
   /* Main: editor + terminal stacked */
   #main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
-  #editor-wrap { flex:1; overflow:hidden; min-height:60px; }
+  #editor-wrap { flex:1; overflow:hidden; min-height:60px; position:relative; }
   #editor { width:100%; height:100%; }
+
+  /* Image viewer */
+  #image-view { display:none; width:100%; height:100%; background:#141414; align-items:center; justify-content:center; flex-direction:column; gap:12px; overflow:auto; }
+  #image-view.active { display:flex; }
+  #image-view img { max-width:90%; max-height:calc(100% - 60px); object-fit:contain; border:1px solid #333; border-radius:4px; }
+  #image-view .img-info { font-size:0.75rem; color:#555; }
 
   /* Terminal resize handle */
   #term-handle { height:4px; background:#111; cursor:row-resize; flex-shrink:0; border-top:1px solid #0a0a0a; display:none; }
@@ -98,6 +106,7 @@
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
   <span class="filepath" id="filepath">No file open</span>
   <button id="btnSave"   onclick="saveFile()">Save</button>
+  <button id="btnDl"     onclick="downloadFile(currentFile)" title="Download current file">⬇ Download</button>
   <button id="btnTerm"   onclick="toggleTerm()" title="Toggle terminal  Ctrl+`">⌨ Terminal</button>
   <button id="btnLogout" onclick="doLogout()">Logout</button>
 </div>
@@ -119,7 +128,13 @@
 
   <!-- Main area: editor + terminal -->
   <div id="main">
-    <div id="editor-wrap"><div id="editor"></div></div>
+    <div id="editor-wrap">
+      <div id="editor"></div>
+      <div id="image-view">
+        <img id="image-el" alt="">
+        <span class="img-info" id="image-info"></span>
+      </div>
+    </div>
     <div id="term-handle"></div>
     <div id="terminal">
       <div id="term-titlebar">
@@ -148,6 +163,7 @@
   <div onmousedown="ctxAction('newfile')">New File</div>
   <div onmousedown="ctxAction('newfolder')">New Folder</div>
   <hr>
+  <div onmousedown="ctxAction('download')" id="ctx-download">⬇ Download</div>
   <div onmousedown="ctxAction('rename')">Rename</div>
   <div onmousedown="ctxAction('delete')" style="color:#f85149">Delete</div>
 </div>
@@ -250,6 +266,9 @@ function fileIcon(n) {
 }
 
 // ── Open file ─────────────────────────────────────────────────────────────────
+function showEditor()     { document.getElementById('editor').style.display = ''; document.getElementById('image-view').classList.remove('active'); }
+function showImageView()  { document.getElementById('editor').style.display = 'none'; document.getElementById('image-view').classList.add('active'); }
+
 async function openFile(path, el) {
   document.querySelectorAll('.tree-file.active').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
@@ -262,14 +281,38 @@ async function openFile(path, el) {
     }
     const data = await res.json();
     if (data.error) { document.getElementById('filepath').textContent = data.error; return; }
+
     currentFile = data.path;
     document.getElementById('filepath').textContent = data.path;
-    document.getElementById('st-lang').textContent  = data.language.toUpperCase();
-    editor.setModel(monaco.editor.createModel(data.content, data.language));
-    editor.focus();
+    document.getElementById('btnDl').style.display = '';
+
+    if (data.type === 'image') {
+      showImageView();
+      const img = document.getElementById('image-el');
+      img.src = data.src;
+      img.onload = () => {
+        document.getElementById('image-info').textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
+      };
+      document.getElementById('st-lang').textContent = 'IMAGE';
+    } else {
+      showEditor();
+      document.getElementById('st-lang').textContent = data.language.toUpperCase();
+      editor.setModel(monaco.editor.createModel(data.content, data.language));
+      editor.focus();
+    }
   } catch (err) {
     document.getElementById('filepath').textContent = 'Failed: ' + err.message;
   }
+}
+
+// ── Download file ─────────────────────────────────────────────────────────────
+function downloadFile(path) {
+  const a = document.createElement('a');
+  a.href = API.download + '?path=' + encodeURIComponent(path);
+  a.download = path.split('/').pop();
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────────
@@ -413,6 +456,7 @@ function showCtx(e, item) {
   e.preventDefault();
   ctxTarget = item;
   const m = document.getElementById('ctxmenu');
+  document.getElementById('ctx-download').style.display = item.type === 'file' ? '' : 'none';
   m.style.display = 'block';
   m.style.left = e.clientX + 'px';
   m.style.top  = e.clientY + 'px';
@@ -426,6 +470,7 @@ function ctxAction(action) {
   if (!ctxTarget) return;
   if (action === 'newfile')   { promptCreate('file',   ctxTarget); return; }
   if (action === 'newfolder') { promptCreate('folder', ctxTarget); return; }
+  if (action === 'download')  { downloadFile(ctxTarget.path); return; }
   if (action === 'rename') {
     openModal('Rename', ctxTarget.name, async name => {
       if (!name || name === ctxTarget.name) return;
