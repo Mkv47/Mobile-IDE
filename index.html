@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Master IDE</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1e1e1e; color:#ccc; font-family:'Segoe UI',system-ui,sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* Top bar */
+  #topbar { height:40px; background:#2d2d2d; border-bottom:1px solid #111; display:flex; align-items:center; padding:0 12px; gap:10px; flex-shrink:0; }
+  #topbar .filepath { flex:1; font-size:0.8rem; color:#888; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #topbar button { padding:4px 14px; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem; }
+  #btnSave   { background:#0e6416; color:#fff; }
+  #btnSave:hover { background:#1a7a20; }
+  #btnLogout { background:#333; color:#aaa; }
+  #btnLogout:hover { background:#444; color:#fff; }
+
+  /* Layout */
+  #body { display:flex; flex:1; overflow:hidden; }
+
+  /* Sidebar */
+  #sidebar { width:220px; background:#252526; border-right:1px solid #111; display:flex; flex-direction:column; overflow:hidden; }
+  #sidebar-header { padding:8px 12px; font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #111; display:flex; align-items:center; justify-content:space-between; }
+  #sidebar-actions { display:flex; gap:8px; }
+  #sidebar-actions span { cursor:pointer; color:#555; font-size:1.1rem; line-height:1; }
+  #sidebar-actions span:hover { color:#ccc; }
+  #filetree { flex:1; overflow-y:auto; padding:4px 0; scrollbar-width:thin; scrollbar-color:#444 transparent; }
+
+  /* Tree items */
+  .tree-item { display:flex; align-items:center; gap:5px; padding:3px 8px; cursor:pointer; font-size:0.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; user-select:none; }
+  .tree-item:hover { background:#2a2d2e; }
+  .tree-item.active { background:#094771; color:#fff; }
+  .tree-item .icon { flex-shrink:0; font-size:0.7rem; width:10px; text-align:center; font-style:normal; }
+  .tree-folder > .folder-children { display:none; }
+  .tree-folder.open > .folder-children { display:block; }
+
+  /* Editor */
+  #editor-wrap { flex:1; overflow:hidden; display:flex; }
+  #editor { flex:1; }
+
+  /* Status bar */
+  #statusbar { height:22px; background:#007acc; display:flex; align-items:center; padding:0 12px; font-size:0.72rem; color:#fff; gap:16px; flex-shrink:0; }
+
+  /* Context menu */
+  #ctxmenu { position:fixed; background:#252526; border:1px solid #454545; border-radius:4px; z-index:9999; min-width:150px; display:none; font-size:0.82rem; box-shadow:0 4px 12px rgba(0,0,0,.4); }
+  #ctxmenu div { padding:7px 16px; cursor:pointer; color:#ccc; }
+  #ctxmenu div:hover { background:#094771; color:#fff; }
+  #ctxmenu hr { border:none; border-top:1px solid #454545; margin:2px 0; }
+
+  /* Modal */
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:10000; display:flex; align-items:center; justify-content:center; }
+  .modal { background:#252526; border:1px solid #454545; border-radius:8px; padding:24px; width:320px; }
+  .modal h3 { margin-bottom:14px; font-size:0.95rem; color:#e6edf3; }
+  .modal input { width:100%; background:#1e1e1e; border:1px solid #454545; border-radius:4px; color:#ccc; padding:8px 10px; font-size:0.85rem; outline:none; }
+  .modal input:focus { border-color:#388bfd; }
+  .modal-btns { display:flex; gap:8px; margin-top:14px; justify-content:flex-end; }
+  .modal-btns button { padding:6px 16px; border:none; border-radius:4px; cursor:pointer; font-size:0.82rem; }
+  .btn-ok { background:#238636; color:#fff; }
+  .btn-cancel { background:#333; color:#aaa; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="topbar">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+  <span class="filepath" id="filepath">No file open</span>
+  <button id="btnSave" onclick="saveFile()">Save</button>
+  <button id="btnLogout" onclick="doLogout()">Logout</button>
+</div>
+
+<!-- Body -->
+<div id="body">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      EXPLORER
+      <div id="sidebar-actions">
+        <span title="New file"   onclick="promptCreate('file')">+</span>
+        <span title="New folder" onclick="promptCreate('folder')">&#x1F4C1;</span>
+      </div>
+    </div>
+    <div id="filetree">Loading…</div>
+  </div>
+  <div id="editor-wrap">
+    <div id="editor"></div>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div id="statusbar">
+  <span id="st-lang">—</span>
+  <span id="st-pos">Ln 1, Col 1</span>
+  <span>UTF-8</span>
+</div>
+
+<!-- Context menu -->
+<div id="ctxmenu" onmousedown="event.stopPropagation()">
+  <div onmousedown="ctxAction('newfile')">New File</div>
+  <div onmousedown="ctxAction('newfolder')">New Folder</div>
+  <hr>
+  <div onmousedown="ctxAction('rename')">Rename</div>
+  <div onmousedown="ctxAction('delete')" style="color:#f85149">Delete</div>
+</div>
+
+<!-- Modal -->
+<div class="modal-bg" id="modalBg" style="display:none">
+  <div class="modal">
+    <h3 id="modalTitle">Name</h3>
+    <input type="text" id="modalInput">
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-ok"     onclick="confirmModal()">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Monaco -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<script>
+// window.MASTER is injected by the Laravel server before this page is served
+const API    = window.MASTER;
+const CSRF   = API.csrf;
+let editor, currentFile = null, ctxTarget = null, modalCb = null;
+
+// ── Boot Monaco ──────────────────────────────────────────────────────────────
+require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+require(['vs/editor/editor.main'], () => {
+  editor = monaco.editor.create(document.getElementById('editor'), {
+    theme: 'vs-dark', language: 'plaintext', fontSize: 14, tabSize: 4,
+    minimap: { enabled: true }, wordWrap: 'off', automaticLayout: true,
+    scrollBeyondLastLine: false, renderWhitespace: 'selection',
+    fontFamily: "'Cascadia Code','Fira Code',Consolas,monospace", fontLigatures: true,
+  });
+  editor.onDidChangeCursorPosition(e =>
+    document.getElementById('st-pos').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`
+  );
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
+  loadTree();
+});
+
+// ── File tree ─────────────────────────────────────────────────────────────────
+async function loadTree() {
+  const res  = await fetch(API.files);
+  const data = await res.json();
+  const el   = document.getElementById('filetree');
+  el.innerHTML = '';
+  renderTree(data, el, 0);
+}
+
+function renderTree(items, container, depth) {
+  items.forEach(item => {
+    const el = document.createElement('div');
+    el.dataset.path = item.path;
+
+    if (item.type === 'folder') {
+      el.className = 'tree-folder';
+
+      const header = document.createElement('div');
+      header.className = 'tree-item';
+      header.style.paddingLeft = (8 + depth * 14) + 'px';
+      header.innerHTML = `<i class="icon">&#x25B6;</i><span>${folderIcon()} ${item.name}</span>`;
+      header.addEventListener('click', e => {
+        e.stopPropagation();
+        el.classList.toggle('open');
+        header.querySelector('.icon').textContent = el.classList.contains('open') ? '▼' : '▶';
+      });
+      header.addEventListener('contextmenu', e => showCtx(e, item));
+
+      const children = document.createElement('div');
+      children.className = 'folder-children';
+      renderTree(item.children || [], children, depth + 1);
+
+      el.appendChild(header);
+      el.appendChild(children);
+    } else {
+      el.className = 'tree-item tree-file';
+      el.style.paddingLeft = (8 + depth * 14) + 'px';
+      el.innerHTML = `<i class="icon"></i><span>${fileIcon(item.name)} ${item.name}</span>`;
+      el.addEventListener('click', e => { e.stopPropagation(); openFile(item.path, el); });
+      el.addEventListener('contextmenu', e => showCtx(e, item));
+    }
+    container.appendChild(el);
+  });
+}
+
+function fileIcon(n) {
+  const e = n.split('.').pop().toLowerCase();
+  return {php:'🐘',js:'📜',ts:'📘',vue:'💚',css:'🎨',scss:'🎨',json:'📋',
+          md:'📝',html:'🌐',blade:'🔪',env:'⚙️',sh:'💻',sql:'🗄️',yml:'⚙️'}[e]||'📄';
+}
+function folderIcon() { return '📁'; }
+
+// ── Open file ─────────────────────────────────────────────────────────────────
+async function openFile(path, el) {
+  document.querySelectorAll('.tree-file.active').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  const res  = await fetch(API.read + '?path=' + encodeURIComponent(path));
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  currentFile = data.path;
+  document.getElementById('filepath').textContent = data.path;
+  document.getElementById('st-lang').textContent  = data.language.toUpperCase();
+  editor.setModel(monaco.editor.createModel(data.content, data.language));
+  editor.focus();
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+async function saveFile() {
+  if (!currentFile) return;
+  const btn = document.getElementById('btnSave');
+  btn.textContent = 'Saving…';
+  const res  = await fetch(API.write, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+    body: JSON.stringify({ path: currentFile, content: editor.getValue() }),
+  });
+  const data = await res.json();
+  btn.textContent = data.ok ? 'Saved ✓' : 'Error ✗';
+  setTimeout(() => btn.textContent = 'Save', 1600);
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+async function doLogout() {
+  await fetch(API.logout, { method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF } });
+  location.reload();
+}
+
+// ── Context menu ──────────────────────────────────────────────────────────────
+function showCtx(e, item) {
+  e.preventDefault();
+  ctxTarget = item;
+  const m = document.getElementById('ctxmenu');
+  m.style.display = 'block';
+  m.style.left = e.clientX + 'px';
+  m.style.top  = e.clientY + 'px';
+}
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('#ctxmenu')) document.getElementById('ctxmenu').style.display = 'none';
+});
+
+function ctxAction(action) {
+  document.getElementById('ctxmenu').style.display = 'none';
+  if (!ctxTarget) return;
+  if (action === 'newfile')   { promptCreate('file',   ctxTarget); return; }
+  if (action === 'newfolder') { promptCreate('folder', ctxTarget); return; }
+  if (action === 'rename') {
+    openModal('Rename', ctxTarget.name, async name => {
+      if (!name || name === ctxTarget.name) return;
+      const dir  = ctxTarget.path.split('/').slice(0, -1).join('/');
+      const to   = (dir ? dir + '/' : '') + name;
+      const res  = await fetch(API.rename, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+        body: JSON.stringify({ from: ctxTarget.path, to }),
+      });
+      const d = await res.json();
+      if (d.error) { alert(d.error); return; }
+      if (currentFile === ctxTarget.path) { currentFile = to; document.getElementById('filepath').textContent = to; }
+      loadTree();
+    });
+  }
+  if (action === 'delete') {
+    if (!confirm(`Delete "${ctxTarget.name}"?`)) return;
+    fetch(API.delete, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+      body: JSON.stringify({ path: ctxTarget.path }),
+    }).then(() => loadTree());
+  }
+}
+
+// ── Create ────────────────────────────────────────────────────────────────────
+function promptCreate(type, parent) {
+  openModal(type === 'file' ? 'New file name' : 'New folder name', '', async name => {
+    if (!name) return;
+    const base = parent ? (parent.type === 'folder' ? parent.path : parent.path.split('/').slice(0,-1).join('/')) : '';
+    await fetch(API.create, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+      body: JSON.stringify({ path: (base ? base + '/' : '') + name, type }),
+    });
+    loadTree();
+  });
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function openModal(title, val, cb) {
+  modalCb = cb;
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalInput').value = val;
+  document.getElementById('modalBg').style.display = 'flex';
+  setTimeout(() => document.getElementById('modalInput').select(), 50);
+}
+function confirmModal() {
+  const v = document.getElementById('modalInput').value.trim();
+  closeModal();
+  if (modalCb) modalCb(v);
+}
+function closeModal() { document.getElementById('modalBg').style.display = 'none'; modalCb = null; }
+document.getElementById('modalInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') confirmModal();
+  if (e.key === 'Escape') closeModal();
+});
+</script>
+</body>
+</html>
